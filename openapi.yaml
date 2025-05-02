@@ -1,0 +1,171 @@
+openapi: 3.1.0
+info:
+  description: REST API to classify PDF files using a smart backend
+  title: PDF Classifier API
+  version: 1.0.0
+servers:
+- url: http://localhost:8080/api/v1
+paths:
+  /classify/{uuid}:
+    post:
+      description: |
+        Upload a PDF as binary and inspect the contents.
+        The data is uploaded in binary form and the result is a structure that returns
+        the type of the document and a key-value list of type-specific identifiers.
+      operationId: classify_pdf
+      parameters:
+      - description: The uuid in the path sets the user's process id for the uploaded
+          pdf.
+        in: path
+        name: uuid
+        required: true
+        schema:
+          example: f47ac10b-58cc-4372-a567-0e02b2c3d479
+          format: string
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/pdf:
+            schema:
+              format: binary
+              type: string
+        description: The PDF as binary data.
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClassificationResult'
+          description: PDF classification successful
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: The uploaded file is either no PDF or could not be accessed
+            properly
+      summary: Classify a PDF uploaded as binary data into type with id-values
+      tags:
+      - classification
+components:
+  schemas:
+    Error:
+      example: |
+        {
+          "code": 400,
+          "message": "The uploaded file is not a valid PDF document."
+        }
+      properties:
+        code:
+          format: int32
+          type: integer
+        message:
+          format: string
+          type: string
+      required:
+      - code
+      - message
+      title: Error
+    QualifiedValue:
+      example: |
+        {
+          "value": "Some Recognized Text",
+          "score": 0.95
+        }
+      properties:
+        value:
+          description: the recognized value
+          example: "1234567"
+          format: string
+          type: string
+        score:
+          description: "The confidence score of the recognition, 0 is no confidence,\
+            \ 1 is perfect confidence"
+          example: 0.99
+          format: double
+          type: number
+      required:
+      - score
+      - value
+    ResultItem:
+      example: |
+        {
+          "kind": "INVOICE",
+          "doc_id": {
+            "value": "RE-2024-00123",
+            "score": 0.99
+          },
+          "doc_date_sic": {
+            "value": "15. März 2024",
+            "score": 0.88
+          },
+          "doc_date_parsed": "2024-03-15T10:00:00+01:00",
+          "doc_subject": {
+            "value": "Rechnung für Beratungsleistungen März 2024",
+            "score": 0.75
+          }
+        }
+      properties:
+        kind:
+          description: "The kind of PDF document, one of INVOICE, STATEMENT, LETTER,\
+            \ CONTRACT, COMMERCIALS"
+          example: INVOICE
+          format: string
+          type: string
+        doc_id:
+          $ref: '#/components/schemas/QualifiedValue'
+        doc_date_sic:
+          $ref: '#/components/schemas/QualifiedValue'
+        doc_date_parsed:
+          description: "The recognized date of the document, as date-time string"
+          example: 2023-10-27T00:00:00Z
+          format: date-time
+          type: string
+        doc_subject:
+          $ref: '#/components/schemas/QualifiedValue'
+      required:
+      - doc_id
+      - kind
+      title: ResultItem
+    ClassificationResult:
+      example: |
+        {
+          "class_id": "c4a8e1b0-5d3c-4f7a-8a2b-9e1d0c2f3a4b",
+          "custom_id": "f47ac10b-58cc-4372-a567-123341221312",
+          "result": {
+            "kind": "INVOICE",
+            "doc_id": {
+              "value": "RE-2024-00123",
+              "score": 0.99
+            },
+            "doc_date_sic": {
+              "value": "15. März 2024",
+              "score": 0.88
+            },
+            "doc_date_parsed": "2024-03-15T10:00:00+01:00",
+            "doc_subject": {
+              "value": "Rechnung für Beratungsleistungen März 2024",
+              "score": 0.75
+            }
+          }
+        }
+      properties:
+        class_id:
+          description: backend generated uuid for the classification process
+          example: f47ac10b-58cc-4372-a567-0e02b2c3d479
+          format: uuid
+          type: string
+        custom_id:
+          description: frontend provided uuid for the classification process
+          example: f47ac10b-58cc-4372-a567-123341221312
+          format: uuid
+          type: string
+        result:
+          $ref: '#/components/schemas/ResultItem'
+      required:
+      - class_id
+      - custom_id
+      - result
+      title: ClassificationResult
