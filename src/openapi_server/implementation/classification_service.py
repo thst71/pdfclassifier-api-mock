@@ -1,68 +1,288 @@
-# openapi_server/implementations/classification_service.py
-import uuid  # Assuming uuid is passed as uuid.UUID
+# openapi_server/implementation/classification_service.py
+import datetime
+import uuid
 
 from fastapi import HTTPException
 
+# Assuming your models are correctly defined and imported
 from openapi_server.apis.classification_api_base import BaseClassificationApi
-from openapi_server.models.classification_result import ClassificationResult  # Import necessary models
+from openapi_server.models.classification_result import ClassificationResult
+from openapi_server.models.result_item import ResultItem
+from openapi_server.models.qualified_value import QualifiedValue
 
+EXPECTED_PDF_HEADER = b'%PDF-'  # Note the b prefix for bytes
 
-# Add any other imports your logic needs
+# --- Data for Mock Responses ---
+# Map UUID endings (last 2 digits as string) to response data dictionaries
+MOCK_RESPONSES = {
+    "10": {
+        "kind": "INVOICE",
+        "doc_id_val": "DOC123", "doc_id_score": 0.99,
+        "doc_date_sic_val": "2024-01-01", "doc_date_sic_score": 0.9,
+        "doc_date_parsed": "2024-01-01T10:00:00Z",
+        "doc_subject_val": "KFZ Reparatur", "doc_subject_score": 0.8
+    },
+    "11": {
+        "kind": "INVOICE",
+        "doc_id_val": "DOC124", "doc_id_score": 0.89,
+        "doc_date_sic_val": "2025-03-12", "doc_date_sic_score": 0.7,
+        "doc_date_parsed": "2025-03-12T00:00:00Z",  # Corrected 'ß'
+        "doc_subject_val": "Ihr Einkauf vielen Dank", "doc_subject_score": 0.8
+    },
+    "12": {
+        "kind": "INVOICE",
+        "doc_id_val": "DOC125", "doc_id_score": 0.79,
+        "doc_date_sic_val": "2025-03-13", "doc_date_sic_score": 0.6,
+        "doc_date_parsed": "2025-03-13T00:00:00Z",  # Corrected 'ß'
+        "doc_subject_val": "Ihr Einkauf vielen Dank", "doc_subject_score": 0.7
+    },
+    # Cases 13-19 are identical to 12
+    "13": {"kind": "INVOICE",
+           "doc_id_val": "DOC126", "doc_id_score": 0.69,
+           "doc_date_sic_val": "2025-03-13", "doc_date_sic_score": 0.5,
+           "doc_date_parsed": "2025-03-13T00:00:00Z",
+           "doc_subject_val": "Ihr Einkauf vielen Dank", "doc_subject_score": 0.6},
+    "14": {"kind": "INVOICE", "doc_id_val": "DOC127", "doc_id_score": 0.59, "doc_date_sic_val": "2025-02-12",
+           "doc_date_sic_score": 0.5, "doc_date_parsed": "2025-02-12T00:00:00Z",
+           "doc_subject_val": "Ihr Einkauf vielen Dank", "doc_subject_score": 0.5},
+    "15": {"kind": "INVOICE", "doc_id_val": "DOC128", "doc_id_score": 0.49, "doc_date_sic_val": "2025-01-11",
+           "doc_date_sic_score": 0.4, "doc_date_parsed": "2025-01-11T00:00:00Z",
+           "doc_subject_val": "Ihr Einkauf vielen Dank", "doc_subject_score": 0.4},
+    "17": {"kind": "INVOICE", "doc_id_val": "DOC129", "doc_id_score": 0.39, "doc_date_sic_val": "2024-12-10",
+           "doc_date_sic_score": 0.3, "doc_date_parsed": "2024-12-10T00:00:00Z",
+           "doc_subject_val": "Ihr Einkauf vielen Dank", "doc_subject_score": 0.3},
+    "18": {"kind": "INVOICE", "doc_id_val": "DOC130", "doc_id_score": 0.29, "doc_date_sic_val": "2024-11-11",
+           "doc_date_sic_score": 0.2, "doc_date_parsed": "2024-11-11T00:00:00Z",
+           "doc_subject_val": "Ihr Einkauf vielen Dank", "doc_subject_score": 0.2},
+    "19": {"kind": "INVOICE", "doc_id_val": "DOC131", "doc_id_score": 0.19, "doc_date_sic_val": "2024-10-09",
+           "doc_date_sic_score": 0.1, "doc_date_parsed": "2024-10-09T00:00:00Z",
+           "doc_subject_val": "Ihr Einkauf vielen Dank", "doc_subject_score": 0.1},
+    "20": {
+        "kind": "STATEMENT",
+        "doc_id_val": "DE92 1234 5678 9123 87", "doc_id_score": 0.99,
+        "doc_date_sic_val": "2025-04-01", "doc_date_sic_score": 0.9,
+        "doc_date_parsed": "2025-04-01T00:00:00Z",  # Corrected 'ß'
+        "doc_subject_val": "Kontoauszug 3-25", "doc_subject_score": 0.7
+    },
+    "21": {
+        "kind": "STATEMENT",
+        "doc_id_val": "DE92 1234 5678 9123 87", "doc_id_score": 0.89,
+        "doc_date_sic_val": "2025-03-01", "doc_date_sic_score": 0.9,
+        "doc_date_parsed": "2025-03-01T00:00:00Z",  # Corrected 'ß'
+        "doc_subject_val": "Kontoauszug 2-25", "doc_subject_score": 0.7
+    },
+    "22": {
+        "kind": "STATEMENT",
+        "doc_id_val": "DE92 1234 5678 9123 87", "doc_id_score": 0.79,
+        "doc_date_sic_val": "2025-02-01", "doc_date_sic_score": 0.9,
+        "doc_date_parsed": "2025-02-01T00:00:00Z",  # Corrected 'ß'
+        "doc_subject_val": "Kontoauszug 1-25", "doc_subject_score": 0.7
+    },
+    "23": {
+        "kind": "STATEMENT",
+        "doc_id_val": "DE92 1234 5678 9123 87", "doc_id_score": 0.69,
+        "doc_date_sic_val": "2025-01-01", "doc_date_sic_score": 0.9,
+        "doc_date_parsed": "2025-01-01T00:00:00Z",  # Corrected 'ß'
+        "doc_subject_val": "Kontoauszug 12-24", "doc_subject_score": 0.7
+    },
+    "24": {
+        "kind": "STATEMENT",
+        "doc_id_val": "DE92 1234 5678 9123 87", "doc_id_score": 0.59,
+        "doc_date_sic_val": "2024-12-01", "doc_date_sic_score": 0.9,
+        "doc_date_parsed": "2024-12-01T00:00:00Z",
+        "doc_subject_val": "Kontoauszug 11-24", "doc_subject_score": 0.7
+    },
+    "25": {
+        "kind": "STATEMENT",
+        "doc_id_val": "DE92 1234 5678 9123 87", "doc_id_score": 0.49,
+        "doc_date_sic_val": "2024-11-01", "doc_date_sic_score": 0.9,
+        "doc_date_parsed": "2024-11-01T00:00:00Z",  # Corrected year from 2025
+        "doc_subject_val": "Kontoauszug 10-24", "doc_subject_score": 0.7
+    },
+    "26": {
+        "kind": "STATEMENT",
+        "doc_id_val": "DE92 1234 5678 9123 87", "doc_id_score": 0.39,
+        "doc_date_sic_val": "2024-10-01", "doc_date_sic_score": 0.9,
+        "doc_date_parsed": "2024-10-01T00:00:00Z",  # Corrected year from 2025
+        "doc_subject_val": "Kontoauszug 09-24", "doc_subject_score": 0.7
+    },
+    "27": {
+        "kind": "STATEMENT",
+        "doc_id_val": "DE92 1234 5678 9123 87", "doc_id_score": 0.29,
+        "doc_date_sic_val": "2024-09-01", "doc_date_sic_score": 0.9,
+        "doc_date_parsed": "2024-09-01T00:00:00Z",  # Corrected year from 2025
+        "doc_subject_val": "Kontoauszug 08-24", "doc_subject_score": 0.7
+    },
+    "28": {
+        "kind": "STATEMENT",
+        "doc_id_val": "DE92 1234 5678 9123 87", "doc_id_score": 0.19,
+        "doc_date_sic_val": "2024-08-01", "doc_date_sic_score": 0.9,
+        "doc_date_parsed": "2024-08-01T00:00:00Z",  # Corrected year from 2025
+        "doc_subject_val": "Kontoauszug 07-24", "doc_subject_score": 0.7
+    },
+    "29": {
+        "kind": "STATEMENT",
+        "doc_id_val": "DE92 1234 5678 9123 87", "doc_id_score": 0.09,
+        "doc_date_sic_val": "2024-07-01", "doc_date_sic_score": 0.9,
+        "doc_date_parsed": "2024-07-01T00:00:00Z",  # Corrected year from 2025
+        "doc_subject_val": "Kontoauszug 06-24", "doc_subject_score": 0.7
+    },
+    "30": {
+        "kind": "LETTER",
+        "doc_id_val": "K7-22389", "doc_id_score": 0.99,
+        "doc_date_sic_val": "2025-04-21", "doc_date_sic_score": 0.99,
+        "doc_date_parsed": "2025-04-21T00:00:00Z",
+        "doc_subject_val": "Versicherungsfall 4711", "doc_subject_score": 0.7
+    },
+    "31": {
+        "kind": "LETTER",
+        "doc_id_val": "K7-22389", "doc_id_score": 0.89,
+        "doc_date_sic_val": "2025-04-01", "doc_date_sic_score": 0.89,
+        "doc_date_parsed": "2025-04-01T00:00:00Z",
+        "doc_subject_val": "Versicherungsfall 4711", "doc_subject_score": 0.7
+    },
+    "32": {
+        "kind": "LETTER",
+        "doc_id_val": "K7-22389", "doc_id_score": 0.79,
+        "doc_date_sic_val": "2025-03-11", "doc_date_sic_score": 0.79,
+        "doc_date_parsed": "2025-03-11T00:00:00Z",
+        "doc_subject_val": "Beitragsanpassung", "doc_subject_score": 0.7
+    },
+    "33": {
+        "kind": "LETTER",
+        "doc_id_val": "B-2025-SSA-KGA", "doc_id_score": 0.69,
+        "doc_date_sic_val": "2025-01-12", "doc_date_sic_score": 0.69,
+        "doc_date_parsed": "2025-01-12T00:00:00Z",
+        "doc_subject_val": "Kindergeld Bertram", "doc_subject_score": 0.7
+    },
+    "34": {
+        "kind": "LETTER",
+        "doc_id_val": "Klasse 7b", "doc_id_score": 0.59,
+        "doc_date_sic_val": "2024-12-22", "doc_date_sic_score": 0.59,
+        "doc_date_parsed": "2024-12-22T00:00:00Z",
+        "doc_subject_val": "Einladung zum Elternabend", "doc_subject_score": 0.7
+    },
+    "35": {
+        "kind": "LETTER",
+        "doc_id_val": "Wandern", "doc_id_score": 0.49,
+        "doc_date_sic_val": "2024-11-10", "doc_date_sic_score": 0.49,
+        "doc_date_parsed": "2024-11-10T00:00:00Z",
+        "doc_subject_val": "Wanderfreunde Bergisch-Gladbach", "doc_subject_score": 0.7
+    },
+    "36": {
+        "kind": "LETTER",
+        "doc_id_val": "Lotto-DE", "doc_id_score": 0.39,
+        "doc_date_sic_val": "2024-10-01", "doc_date_sic_score": 0.39,
+        "doc_date_parsed": "2024-10-01T00:00:00Z",
+        "doc_subject_val": "Hxx-123-so-aaaayxy", "doc_subject_score": 0.2
+    },
+    "37": {
+        "kind": "LETTER",
+        "doc_id_val": "", "doc_id_score": 0.29,
+        "doc_date_sic_val": "2024-09-01", "doc_date_sic_score": 0.29,
+        "doc_date_parsed": "2024-09-01T00:00:00Z",
+        "doc_subject_val": "", "doc_subject_score": 0.0
+    },
+    "38": {  # Note: Table had 39 then 38, assuming 38 comes before 39
+        "kind": "LETTER",
+        "doc_id_val": "", "doc_id_score": 0.19,
+        "doc_date_sic_val": "2024-08-01", "doc_date_sic_score": 0.19,
+        "doc_date_parsed": "2024-08-01T00:00:00Z",
+        "doc_subject_val": "", "doc_subject_score": 0.0
+    },
+    "39": {
+        "kind": "LETTER",
+        "doc_id_val": "", "doc_id_score": 0.09,
+        "doc_date_sic_val": "2024-07-01", "doc_date_sic_score": 0.09,
+        "doc_date_parsed": "2024-07-01T00:00:00Z",
+        "doc_subject_val": "", "doc_subject_score": 0.0
+    },
+}
+
+# --- Default response if UUID ending doesn't match ---
+DEFAULT_RESPONSE_DATA = {
+    "kind": "UNKNOWN",
+    "doc_id_val": "N/A", "doc_id_score": 0.0,
+    "doc_date_sic_val": "N/A", "doc_date_sic_score": 0.0,
+    "doc_date_parsed": "1970-01-01T00:00:00Z",
+    "doc_subject_val": "Default - No Match", "doc_subject_score": 0.0
+}
+
 
 class ClassificationServiceImpl(BaseClassificationApi):
     """
-       Concrete implementation of the Classification API logic.
-       """
+    Concrete implementation of the Classification API logic.
+    """
 
     def classify_pdf(
             self,
-            uuid_param: uuid.UUID,  # Match the type hint from the generated base or route
-            body: bytes  # Match the type hint for the request body
-    ) -> ClassificationResult:  # Return type should match the response model
+            uuid_param_str: str,
+            body: bytes
+    ) -> ClassificationResult:
         """
-           Actual implementation to classify the PDF.
-           """
+        Actual implementation to classify the PDF.
+        Returns a mocked response based on the last two digits of uuid_param.
+        """
         print(f"--- Inside ClassificationServiceImpl.classify_pdf ---")
-        print(f"Received UUID: {uuid_param}")
-        print(f"Received body length: {len(body)} bytes")
+        print(f"Received UUID: {uuid_param_str}")
+        print(f"Received body length: {len(body) if body else 0} bytes")
 
-        # --- YOUR ACTUAL CLASSIFICATION LOGIC GOES HERE ---
-        # 1. Process the 'body' (which should be the PDF bytes)
-        # 2. Perform classification
-        # 3. Handle potential errors (e.g., raise HTTPException for bad input)
-        # 4. Construct the ClassificationResult model instance
+        # Ensure the uuid_param_str is a string
+        uuid_param = self.assertValidUuidParam(uuid_param_str)
 
-        # Example Error Handling:
-        if not body:
-            # You might want to map this to your Error model if defined in OpenAPI
-            raise HTTPException(status_code=400, detail="PDF body cannot be empty")
+        # Ensure the body is somewhat a PDF
+        self.assertValidBody(body)
 
-        # Example Success Response (replace with real data):
         try:
-            # Simulate processing...
-            classification = "INVOICE"  # Your logic determines this
-            confidence = 0.95  # Your logic determines this
+            # --- Determine response based on UUID ---
+            uuid_str = str(uuid_param)
+            uuid_ending = uuid_str[-2:]  # Get last two characters
 
-            # Construct the result based on your defined Pydantic/OpenAPI models
-            # This part needs careful mapping to your actual model structure
-            # Assuming ClassificationResult and nested models exist
-            result_data = {  # Placeholder structure - adapt to your models
-                "kind": classification,
-                "doc_id": {"value": "DOC123", "score": 0.99},
-                "doc_date_sic": {"value": "2024-01-01", "score": 0.9},
-                "doc_date_parsed": "2024-01-01T10:00:00Z",
-                "doc_subject": {"value": "Subject", "score": 0.8}
-            }
+            # Get the specific response data, or use default if not found
+            response_data = MOCK_RESPONSES.get(uuid_ending, DEFAULT_RESPONSE_DATA)
+            print(f"Using response data for UUID ending: '{uuid_ending}'")
 
+            # --- Construct the ResultItem ---
+            # Use the specific data from the selected dictionary
+            result_item = ResultItem(
+                kind=response_data["kind"],
+                doc_id=QualifiedValue(value=response_data["doc_id_val"], score=response_data["doc_id_score"]),
+                doc_date_sic=QualifiedValue(value=response_data["doc_date_sic_val"],
+                                            score=response_data["doc_date_sic_score"]),
+                doc_date_parsed=datetime.datetime.fromisoformat(response_data["doc_date_parsed"]),
+                doc_subject=QualifiedValue(value=response_data["doc_subject_val"],
+                                           score=response_data["doc_subject_score"])
+            )
+
+            # --- Construct the final ClassificationResult ---
             response_model = ClassificationResult(
-                class_id=uuid.uuid4(),  # Generate or retrieve appropriate ID
-                custom_id=uuid_param,
-                result=result_data  # Assign the constructed result data
+                class_id=str(uuid.uuid4()),  # Generate a new unique ID for this classification result
+                custom_id=uuid_str,  # Use the input UUID as the custom ID
+                result=result_item  # Assign the constructed ResultItem
             )
             return response_model
 
         except Exception as e:
-            print(f"Error during classification: {e}")
-            # Map to your Error model if possible
-            raise HTTPException(status_code=500, detail=f"Internal server error during classification: {e}")
-        # --- END OF YOUR LOGIC ---
+            # Log the detailed error for debugging
+            print(f"Error during classification processing for UUID {uuid_param}: {e}")
+            import traceback
+            traceback.print_exc()  # Print the full traceback to the console
+
+            # Return a generic 500 error to the client
+            raise HTTPException(status_code=500,
+                                detail=f"Internal server error during classification: An unexpected error occurred. {e}")
+            # --- END OF YOUR LOGIC ---
+
+    def assertValidBody(self, body:bytes):
+        if not body or len(body) == 0:
+            raise HTTPException(status_code=400, detail="PDF body must be present")
+        if len(body) <= len(EXPECTED_PDF_HEADER):
+            raise HTTPException(status_code=400, detail="PDF body too short")
+        if not body or not body[0:len(EXPECTED_PDF_HEADER)] == EXPECTED_PDF_HEADER:
+            raise HTTPException(status_code=400, detail="Invalid file format: Does not appear to be a PDF.")
+
+    def assertValidUuidParam(self, uuid_param_str: str) -> uuid.UUID:
+        try:
+            return uuid.UUID(uuid_param_str)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid UUID format")

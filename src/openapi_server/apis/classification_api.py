@@ -5,7 +5,7 @@ import importlib
 import pkgutil
 
 from openapi_server.apis.classification_api_base import BaseClassificationApi
-import openapi_server.impl
+import openapi_server.implementation
 
 from fastapi import (  # noqa: F401
     APIRouter,
@@ -28,7 +28,7 @@ from openapi_server.models.error import Error
 
 router = APIRouter()
 
-ns_pkg = openapi_server.impl
+ns_pkg = openapi_server.implementation
 for _, name, _ in pkgutil.iter_modules(ns_pkg.__path__, ns_pkg.__name__ + "."):
     importlib.import_module(name)
 
@@ -45,7 +45,7 @@ for _, name, _ in pkgutil.iter_modules(ns_pkg.__path__, ns_pkg.__name__ + "."):
 )
 async def classify_pdf(
     uuid: str = Path(..., description="The uuid in the path sets the user&#39;s process id for the uploaded pdf."),
-    body: str = Body(None, description="The PDF as binary data.", media_type="application/pdf"),
+    body: bytes = Body(None, description="The PDF as binary data.", media_type="application/pdf"),
 ) -> ClassificationResult:
     """Upload a PDF as binary and inspect the contents. The data is uploaded in binary form and the result is a structure that returns the type of the document and a key-value list of type-specific identifiers. """
     return BaseClassificationApi.subclasses[0]().classify_pdf(uuid, body)
