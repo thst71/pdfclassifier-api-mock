@@ -1,0 +1,9 @@
+services:
+  latest:
+    image: ghcr.io/thst71/pdfclassifier-api-mock:latest
+    ports:
+      - 8080:8080
+  main:
+    image: ghcr.io/thst71/pdfclassifier-api-mock:main
+    ports:
+      - 8080:8080
