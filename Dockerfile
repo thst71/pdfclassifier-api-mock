@@ -28,3 +28,4 @@ FROM python:3.11 AS service
 WORKDIR /root/app/site-packages
 COPY --from=test_runner /venv /venv
 ENV PATH=/venv/bin:$PATH
+CMD ["uvicorn", "openapi_server.main:app", "--host", "0.0.0.0", "--port", "8080"]
