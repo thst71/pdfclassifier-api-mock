@@ -7,3 +7,11 @@ services:
     ports:
       - "8080:8080"
     command: uvicorn openapi_server.main:app --host 0.0.0.0 --port 8080
+
+  scanner:
+    build:
+      context: .
+      dockerfile: Dockerfile.scanner
+      target: scanner
+    volumes:
+      - ./tmp:/inbox

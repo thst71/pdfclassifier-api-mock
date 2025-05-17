@@ -30,7 +30,7 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Build and push Docker image with release tags
+    - name: Build and push Docker image for service with release tags
       if: github.event_name == 'release'
       uses: docker/build-push-action@v5
       with:
@@ -42,7 +42,20 @@ jobs:
           ghcr.io/${{ github.repository }}:${{ github.ref_name }} 
           ghcr.io/${{ github.repository }}:latest
 
-    - name: Build and push Docker image for main branch (only arm64)
+    - name: Build and push Docker image for scanner-mock with release tags
+      if: github.event_name == 'release'
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: Dockerfile.scanner
+        push: true
+        platforms: linux/amd64,linux/arm64
+        tags: |
+          ghcr.io/${{ github.repository }}-scanner-mock:${{ github.sha }} 
+          ghcr.io/${{ github.repository }}-scanner-mock:${{ github.ref_name }} 
+          ghcr.io/${{ github.repository }}-scanner-mock:latest
+
+    - name: Build and push Docker image for service main branch (only arm64)
       if: github.event_name == 'push' && github.ref == 'refs/heads/main'
       uses: docker/build-push-action@v5
       with:
@@ -52,3 +65,15 @@ jobs:
         tags: |
           ghcr.io/${{ github.repository }}:${{ github.sha }} 
           ghcr.io/${{ github.repository }}:main          
+
+    - name: Build and push Docker image for scanner-mock main branch (only arm64)
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        file: Dockerfile.scanner
+        platforms: linux/arm64
+        tags: |
+          ghcr.io/${{ github.repository }}-scanner-mock:${{ github.sha }} 
+          ghcr.io/${{ github.repository }}-scanner-mock:main          
