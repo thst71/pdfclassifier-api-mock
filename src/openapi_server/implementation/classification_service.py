@@ -1,5 +1,7 @@
 # openapi_server/implementation/classification_service.py
 import datetime
+import random
+import string
 import uuid
 
 from fastapi import HTTPException
@@ -209,10 +211,45 @@ DEFAULT_RESPONSE_DATA = {
 }
 
 
+# Define a set of characters to use for random replacement.
+# This excludes control characters but includes common text characters.
+PRINTABLE_CHARS = string.ascii_letters + string.digits + string.punctuation + ' '
+
 class ClassificationServiceImpl(BaseClassificationApi):
     """
     Concrete implementation of the Classification API logic.
     """
+
+    @staticmethod
+    def corrupt_value(original_value, score_str):
+        """
+        Corrupts a string value character by character based on a score.
+        A higher score means a higher probability of the character being correct.
+
+        Args:
+            original_value (str): The string to be corrupted.
+            score_str (str): The score as a string (e.g., "0.9").
+
+        Returns:
+            str: The potentially corrupted string.
+        """
+        if not original_value:  # Handle empty or None values
+            return ""
+        try:
+            score = float(score_str)
+            if not (0.0 <= score <= 1.0):  # Ensure score is a valid probability
+                score = 1.0  # Default to no corruption if score is invalid
+        except (ValueError, TypeError):
+            # If score is not a valid float or None, return original value (no corruption)
+            return original_value
+
+        corrupted_char_list = []
+        for char_code in original_value:
+            if random.random() < score:
+                corrupted_char_list.append(char_code)
+            else:
+                corrupted_char_list.append(random.choice(PRINTABLE_CHARS))
+        return "".join(corrupted_char_list)
 
     def classify_pdf(
             self,
@@ -244,13 +281,19 @@ class ClassificationServiceImpl(BaseClassificationApi):
 
             # --- Construct the ResultItem ---
             # Use the specific data from the selected dictionary
+            try:
+                parsed_date = datetime.datetime.fromisoformat(response_data["doc_date_parsed"])
+            except ValueError:
+                parsed_date = None
+
             result_item = ResultItem(
                 kind=response_data["kind"],
-                doc_id=QualifiedValue(value=response_data["doc_id_val"], score=response_data["doc_id_score"]),
-                doc_date_sic=QualifiedValue(value=response_data["doc_date_sic_val"],
+                doc_id=QualifiedValue(value=ClassificationServiceImpl.corrupt_value(response_data["doc_id_val"], response_data["doc_id_score"]),
+                                      score=response_data["doc_id_score"]),
+                doc_date_sic=QualifiedValue(value=ClassificationServiceImpl.corrupt_value(response_data["doc_date_sic_val"], response_data["doc_date_sic_score"]),
                                             score=response_data["doc_date_sic_score"]),
-                doc_date_parsed=datetime.datetime.fromisoformat(response_data["doc_date_parsed"]),
-                doc_subject=QualifiedValue(value=response_data["doc_subject_val"],
+                doc_date_parsed=parsed_date,
+                doc_subject=QualifiedValue(value=ClassificationServiceImpl.corrupt_value(response_data["doc_subject_val"], response_data["doc_subject_score"]),
                                            score=response_data["doc_subject_score"])
             )
 
