@@ -7,3 +7,13 @@ services:
     image: ghcr.io/thst71/pdfclassifier-api-mock:main
     ports:
       - 8080:8080
+  scanner-latest:
+    image: ghcr.io/thst71/pdfclassifier-api-mock-scanner-mock:latest
+    volumes:
+      # create the folder ./inbox in the local directory!
+      - ./inbox:/inbox
+  scanner-main:
+    image: ghcr.io/thst71/pdfclassifier-api-mock-scanner-mock:main
+    volumes:
+      # create the folder ./inbox in the local directory!
+      - ./inbox:/inbox
